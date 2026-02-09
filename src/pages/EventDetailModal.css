@@ -1,0 +1,106 @@
+/* src/pages/EventDetailModal.css (File Baru) */
+
+/* Asumsi Anda sudah punya CSS untuk modal-overlay dan modal-content */
+/* Jika belum, tambahkan ini: */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 25px;
+  border-radius: 12px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  position: relative;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 15px;
+  margin-bottom: 20px;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #333;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #888;
+  padding: 0;
+}
+.close-btn:hover {
+  color: #000;
+}
+/* --- Akhir CSS Modal Dasar --- */
+
+
+/* --- CSS SPESIFIK UNTUK DETAIL EVENT --- */
+.event-detail-modal .modal-body {
+  padding-top: 0;
+}
+
+.event-modal-subtitle {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: #555;
+  margin-top: 0;
+  margin-bottom: 25px;
+  padding-bottom: 15px;
+  border-bottom: 1px dashed #ddd;
+}
+
+.event-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px; /* Jarak antar item */
+}
+
+.event-detail-item {
+  display: flex;
+  align-items: flex-start; /* Agar ikon dan teks sejajar di atas */
+  gap: 15px;
+}
+
+.event-detail-item .detail-icon {
+  color: #007bff; /* Warna ikon (biru, sesuaikan) */
+  flex-shrink: 0;
+  padding-top: 3px; /* Penyesuaian posisi ikon */
+}
+
+.event-detail-item .detail-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.event-detail-item .detail-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #777;
+  text-transform: uppercase;
+}
+
+.event-detail-item .detail-value {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #222;
+}

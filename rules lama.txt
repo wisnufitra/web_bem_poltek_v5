@@ -1,0 +1,116 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================
+    // Aturan untuk Halaman & Konten Publik
+    // ===============================================
+    match /halaman/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /berita/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /struktur/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /dokumen/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /dokumen_kategori/{docId} {
+  		allow read: if true;
+  		allow write: if request.auth != null;
+		}
+    match /layanan/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // ===============================================
+    // Aturan untuk Data Pengguna & Admin
+    // ===============================================
+    match /users/{userId} {
+      allow read, update: if request.auth.uid == userId;
+      allow read, update, delete: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master';
+      allow create: if request.auth != null;
+    }
+    
+    // ===============================================
+    // Aturan untuk Fitur E-Voting
+    // ===============================================
+
+    // Permintaan Pemilihan
+    match /pemilihan_requests/{reqId} {
+      allow create: if true;
+      // --- PERBAIKAN DI SINI ---
+      // Master Admin perlu izin 'list' dan 'delete'
+      allow list, read, update, delete: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master';
+    }
+
+    // Event Pemilihan
+    match /pemilihan_events/{eventId} {
+      // Siapa saja (termasuk pengunjung) boleh membaca daftar event dan hasilnya
+      allow get, list: if true;
+
+      // Master Admin boleh membuat event baru
+      allow create: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master';
+
+      // Izin update diberikan kepada: Master Admin, Panitia, atau Pemilih yang sah
+      allow update: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master'
+                      || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'panitia' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.eventId == eventId)
+                      || exists(/databases/$(database)/documents/voters/$(request.auth.uid));
+      
+      // Hanya Master Admin yang bisa menghapus event.
+      allow delete: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master';
+    }
+    
+    // Data Pemilih (Voters)
+    match /voters/{voterId} {
+      allow read, write: if request.auth != null;
+    }
+
+		// Aturan untuk Direktori Organisasi
+		match /organisasi/{orgId} {
+  	// Siapa saja boleh membaca daftar organisasi
+  	allow read: if true;
+  	// Hanya master admin yang bisa mengubah data organisasi
+  	allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master';
+		}
+
+    // ===============================================
+    // Aturan untuk Data Internal Admin
+    // ===============================================
+    match /histori/{logId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // =============================================================
+    // --- TAMBAHKAN BLOK BARU DI SINI ---
+    // =============================================================
+    
+    // KOLEKSI 1: submissionFormFields (Konfigurasi Form)
+    // Aturan: Siapa saja boleh MEMBACA (untuk menampilkan form),
+    //         tapi hanya user yang role-nya 'master' yang boleh MENULIS.
+    match /submissionFormFields/{fieldId} {
+      allow read: if true;
+      allow write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master';
+    }
+
+    // KOLEKSI 2: submissions (Data Pengajuan Berkas)
+    // Aturan:
+    // - Siapa saja boleh MEMBUAT (create) pengajuan baru.
+    // - Siapa saja boleh MEMBACA (read) data pengajuan (untuk halaman lacak).
+    // - Hanya user yang sudah LOGIN dan memiliki role ('admin', 'master', atau 'banggar') yang boleh MENGUBAH (update) statusnya.
+    match /submissions/{submissionId} {
+      allow create: if true;
+      allow read: if true;
+      allow update: if request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'master', 'banggar']);
+      allow delete: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master';
+    }
+    // --- AKHIR DARI BLOK BARU ---
+  }
+}

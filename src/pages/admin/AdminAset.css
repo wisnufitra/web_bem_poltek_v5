@@ -1,0 +1,289 @@
+/*
+|--------------------------------------------------------------------------
+| AdminAset.css
+|--------------------------------------------------------------------------
+| Styling untuk komponen AdminAset.jsx
+*/
+
+/* === BASE & LAYOUT === */
+.admin-page{font-family:'Inter',sans-serif;background-color:#f4f7fa;min-height:100vh;padding:24px}
+.page-header{margin-bottom:24px}
+.page-title{color:#1e293b;font-size:1.75rem;font-weight:700;margin:0}
+.page-subtitle{color:#64748b;font-size:1rem;margin:4px 0 0}
+.card{background-color:#fff;padding:24px;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 6px 15px -3px rgba(0,0,0,.08);margin-bottom:24px;overflow:hidden}
+.card-title{margin:0 0 16px 0;color:#1e293b;font-size:1.25rem;font-weight:600}
+.loading-text{text-align:center;color:#64748b;padding:20px}
+.empty-state{text-align:center;padding:40px 0;color:#94a3b8}
+.empty-state-text{font-size:1.2rem;font-weight:600;margin-top:8px}
+.empty-state-subtext{font-size:.9rem;color:#a0a0a0}
+.full-width-button{width:100%;margin-top:8px}
+
+
+/* --- MODAL, TOAST & CONFIRMATION --- */
+.toast {
+    position: fixed; top: 20px; right: 20px; background-color: #10b981; color: white;
+    padding: 12px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    z-index: 1001; font-weight: 600;
+}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background-color:rgba(15,23,42,.7);-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-content{background-color:#fff;border-radius:12px;width:100%;max-width:500px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 15px 30px rgba(0,0,0,.15)}
+.modal-content.large{max-width:900px}
+.modal-content.small-modal{max-width:400px;text-align:center; padding: 24px;}
+.modal-header{padding:20px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;flex-shrink:0}
+.modal-actions{display:flex;justify-content:flex-end;gap:12px;flex-shrink:0;border-top:1px solid #e2e8f0;padding:16px 24px;background-color:#f8fafc}
+.modal-title{font-size: 1.3rem; margin-bottom: 20px; color: #1e293b;}
+.modal-form{display:flex;flex-direction:column;flex-grow:1;overflow:hidden}
+.modal-body{padding:24px;overflow-y:auto;flex-grow:1;display:flex;flex-direction:column;gap:24px}
+
+
+/* --- FORM & INPUTS --- */
+.input{display:block;width:100%;padding:10px 12px;border-radius:8px;border:1px solid #cbd5e0;font-size:1rem;background-color:#fff;transition:border-color .2s}
+.input:focus{border-color:#2563eb;outline:0;box-shadow:0 0 0 3px rgba(37,99,235,.2)}
+.label{display:block;margin-bottom:6px;font-size:.85rem;color:#334155;font-weight:600}
+.form-grid-2-col{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.form-section-title{font-size:1.1rem;font-weight:700;color:#1e293b;margin:0;padding-bottom:12px;border-bottom:1px solid #e2e8f0}
+.form-group{margin-bottom:15px}
+.input-with-icon{position:relative;display:flex;align-items:center}
+.input-with-icon .input{padding-left:40px}
+.input-with-icon svg{position:absolute;left:14px;color:#9ca3af;pointer-events:none}
+
+/* Toggle Switch (for isPublic/dapatDipinjamkan) */
+.toggle-group{display:flex;align-items:center;justify-content:space-between}
+.toggle-switch{position:relative;display:inline-block;width:60px;height:34px}
+.toggle-switch input{
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    cursor: pointer;
+    opacity: 0; /* Tetap sembunyikan secara visual */
+    z-index: 10; /* Beri z-index tinggi agar bisa di-klik */
+}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#ccc;transition:.4s;border-radius:34px}
+.slider:before{position:absolute;content:"";height:26px;width:26px;left:4px;bottom:4px;background-color:white;transition:.4s;border-radius:50%}
+input:checked+.slider{background-color:#2563eb}
+input:checked+.slider:before{transform:translateX(26px)}
+
+/* Image Upload */
+.image-uploader{display:flex;flex-direction:column;gap:10px}
+.upload-label{cursor:pointer;width:fit-content}
+.image-preview-grid{display:flex;gap:10px;flex-wrap:wrap}
+.image-preview-item{position:relative;width:80px;height:80px;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
+.image-preview-item img{width:100%;height:100%;object-fit:cover}
+.image-preview-item button{position:absolute;top:2px;right:2px;background-color:rgba(255,255,255,.8);border:none;border-radius:50%;padding:4px;color:#ef4444;line-height:1;cursor:pointer}
+.image-uploader-note{font-size:.85rem;color:#64748b;margin:0}
+
+
+/* --- BUTTONS & ACTIONS --- */
+.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem;text-decoration:none;border:1px solid transparent;transition:all .2s}
+.button-primary{background-color:#2563eb;color:#fff}
+.button-primary:hover{background-color:#1d4ed8}
+.button-secondary{background-color:#f1f5f9;color:#475569;border-color:#e2e8f0}
+.button-secondary:hover{background-color:#e2e8f0}
+.button-success{background-color:#10b981;color:#fff}
+.button-success:hover{background-color:#059669}
+.button-danger{background-color:#ef4444;color:#fff}
+.button-danger:hover{background-color:#dc2626}
+.button-icon{padding:8px;border-radius:8px;border:none;background-color:transparent;color:#64748b;cursor:pointer}
+.button-icon:hover{background-color:#e2e8f0;color:#1e293b}
+.button-icon.primary-hover:hover{background-color:#dbeafe;color:#2563eb}
+.button-icon.danger-hover:hover{background-color:#fee2e2;color:#ef4444}
+
+
+/* === FILTER CONTROLS STYLING === */
+.filter-controls {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 0 0 16px 0;
+}
+.filter-controls.search-input-row {
+    padding-bottom: 0;
+    margin-bottom: 20px;
+}
+.filter-controls.search-input-row .search-full-width {
+    flex: 1;
+}
+.filter-controls.dropdown-row {
+    border-top: 1px solid #e2e8f0; 
+    padding-top: 20px;
+    margin-bottom: 24px;
+}
+.filter-controls.dropdown-row .input-with-icon {
+    flex: 1;
+}
+.list-header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px}
+.list-header-actions{display:flex;gap:12px}
+
+
+/* === STATISTIC CARDS === */
+.stat-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background-color:#fff;padding:16px;border-radius:12px;border:1px solid #e2e8f0;border-left:4px solid #9ca3af;box-shadow:0 2px 4px rgba(0,0,0,.05);}
+.stat-card.good{border-color:#10b981}.stat-card.warning{border-color:#f97316}.stat-card.danger{border-color:#ef4444}.stat-card.primary{border-color:#2563eb}.stat-card.info{border-color:#0ea5e9}
+.stat-card h4{margin:0 0 8px;color:#64748b;font-size:.8rem;font-weight:700;text-transform:uppercase}.stat-card p{margin:0;color:#1e293b;font-size:2rem;font-weight:800}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px}
+.chart-container-wrapper{position:relative;height:320px;width:100%}
+
+
+/* === ASSET LIST & ITEMS === */
+.item-list{display:flex;flex-direction:column;gap:12px;margin-top:0}
+
+.list-item-condensed.aset-item{
+    display: grid;
+    /* KOREKSI: 4 kolom utama: Main Info (2.5), Details (3), Status (1.5), Actions (Auto) */
+    grid-template-columns: 2.5fr 3fr 1.5fr auto; 
+    align-items: center;
+    padding: 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    transition: background-color .2s;
+}
+.list-item-condensed.aset-item:hover{background-color:#f8fafc}
+
+/* Kolom 1: Main Info */
+.item-main-info{display:flex;align-items:center;gap:16px}
+.item-thumbnail{width:50px;height:50px;border-radius:6px;object-fit:cover;background-color:#e2e8f0;flex-shrink:0; color:#94a3b8; display: flex; align-items: center; justify-content: center;}
+.item-thumbnail svg { width: 60%; height: 60%; } 
+.item-main-info strong{font-size:1rem;color:#1e293b}
+.item-main-info small{font-size:.8rem;color:#94a3b8}
+
+/* Kolom 2: Item Details (Lokasi, Jumlah, Perolehan, Status Global) */
+.item-details { 
+    display: flex;
+    flex-direction: column; 
+    gap: 4px; 
+}
+.item-details p{margin:0;font-size:.85rem;color:#475569;line-height:1.4}.item-details p strong{font-weight:600;color:#1e293b}
+
+/* Status Label (Digunakan untuk status global 'Dapat Dipinjamkan') */
+.status-label {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: .75rem;
+    font-weight: 700;
+    margin-top: 6px;
+    text-transform: uppercase;
+    width: fit-content;
+}
+.status-label.status-diperbolehkan {
+    background-color: #dbeafe; 
+    color: #1e40af;
+}
+.status-label.status-dilarang {
+    background-color: #fee2e2; 
+    color: #991b1b;
+}
+
+/* Kolom 3: Item Status (Kondisi & Peminjaman Saat Ini) */
+.item-status{
+    display:flex;
+    flex-direction: column; /* Biarkan bertumpuk vertikal */
+    gap:6px;
+    align-items:flex-end;
+}
+.item-actions{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+
+/* Status Badge (Digunakan untuk Kondisi dan Peminjaman Saat Ini) */
+.status-badge{padding:6px 12px;border-radius:9999px;font-size:.7rem;font-weight:700;text-transform:uppercase}
+.status-baik{background-color:#dcfce7;color:#065f46}.status-perlu-perbaikan{background-color:#fef08a;color:#a16207}.status-rusak{background-color:#fee2e2;color:#991b1b}.status-tersedia{background-color:#10b981;color:#fff}.status-dipinjam{background-color:#64748b;color:#fff}
+
+
+/* === QR CODE MODAL STYLING === */
+.qr-code-container{display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px 0}
+.qr-preview-simple{
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 5px;
+    background-color: #fff;
+    display: inline-block;
+}
+.download-button{width:calc(100% - 48px); max-width: 256px; margin-top: 8px;}
+.qr-frame-printable {
+    width: 350px; background-color: #ffffff; border: 1px solid #1e293b; border-radius: 12px; padding: 20px;
+    font-family: 'Inter', sans-serif; color: #1e293b; text-align: center; position: absolute; left: -9999px; 
+    display: flex; flex-direction: column; gap: 15px; 
+}
+.qr-frame-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0; margin-bottom: 10px;}
+.qr-frame-header .logo { height: 40px; width: auto; object-fit: contain; position: relative; z-index: 2;}
+.qr-frame-header .header-text { flex-grow: 1; margin: 0 10px; text-align: center; line-height: 1.2;}
+.qr-frame-header .org-name { font-weight: 700; font-size: 14px; margin: 0; color: #2563eb;}
+.qr-frame-header .poltek-name, .qr-frame-header .brin-name { font-size: 10px; color: #475569; margin: 0;}
+.qr-code-wrapper { position: relative; z-index: 1; padding: 10px; background-color: #f8fafc; border-radius: 8px; display: flex;
+    justify-content: center; align-items: center; width: 220px; height: 220px; margin: 0 auto;
+}
+.center-logo { position: absolute; z-index: 10; width: 50px; height: 50px; display: flex; justify-content: center;
+    align-items: center; background: #FFFFFF; border-radius: 5px; padding: 5px; top: 50%; left: 50%;
+    transform: translate(-50%, -50%); box-shadow: 0 0 5px rgba(0,0,0,0.2);
+}
+.qr-frame-footer { padding-top: 10px; border-top: 2px solid #e2e8f0; margin-top: 10px;}
+.qr-frame-footer .asset-code { font-size: 11px; color: #475569; margin: 0 0 5px 0;}
+.qr-frame-footer .asset-title { font-weight: 700; font-size: 18px; margin: 0 0 5px 0;}
+
+
+/* === PAGINATION STYLING === */
+.pagination-controls {
+    display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 24px; padding: 12px 20px; 
+    border-top: 1px solid #e2e8f0; background-color: #ffffff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); 
+    max-width: fit-content; margin-left: auto; margin-right: auto; 
+}
+.page-numbers-group { display: flex; gap: 4px; }
+.pagination-number {
+    padding: 8px 12px; border-radius: 6px; border: 1px solid #cbd5e0; background-color: #fff;
+    color: #475569; font-weight: 600; cursor: pointer; transition: all 0.2s ease;
+}
+.pagination-number:hover { background-color: #f1f5f9; }
+.pagination-number.active {
+    background-color: #2563eb; color: #fff; border-color: #2563eb; cursor: default;
+}
+.pagination-controls .button-secondary {
+    padding: 8px 14px; border-radius: 6px; background-color: #f1f5f9; color: #475569;
+    border: 1px solid #cbd5e0; font-weight: 500; display: flex; align-items: center; gap: 6px; 
+}
+
+
+/* === MEDIA QUERIES (RESPONSIVE) === */
+@media(min-width:768px){
+    .form-grid-2-col{grid-template-columns:1fr 1fr}
+}
+@media(max-width:1024px){
+    /* Tablet View */
+    .list-item-condensed.aset-item{
+        grid-template-columns: 1fr; /* Stack vertically */
+        gap: 12px;
+    padding: 12px;
+    }
+    .item-main-info { 
+        width: 100%;
+        gap: 10px;
+    }
+    .item-details { order: 2; width: 100%; }
+    .item-status { order: 3; width: 100%; flex-direction: row; justify-content: flex-start; align-items: center; gap: 8px; text-align: left; margin-top: 8px;}
+    .item-actions { order: 4; width: 100%; justify-content: flex-start; margin-top: 10px; }
+    
+    .item-details .status-label { margin-top: 8px; }
+}
+@media(max-width:767px){
+    /* Mobile View */
+    .admin-page{padding:16px}
+    .stat-card-grid{grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px;}
+    .list-header{flex-direction:column; align-items: stretch;}
+    .list-header-actions { flex-direction: column; width: 100%; gap: 8px; }
+    .filter-controls { flex-direction: column; align-items: stretch; gap: 12px; }
+    .filter-controls.dropdown-row { padding-top: 12px; }
+    .filter-controls.search-input-row { margin-bottom: 12px; }
+    .filter-controls .input-with-icon { width: 100%; flex: none; }
+    
+    /* Item List Mobile adjustments */
+    .item-status { 
+        /* Pastikan label status global (status-label) muncul di item-details di mobile */
+        flex-direction: column; /* Kembali ke kolom agar badge utama tidak memanjang */
+        align-items: flex-start; 
+    }
+    .item-details {
+        /* Tambahkan padding bawah agar label status global tidak menempel */
+        padding-bottom: 0; 
+    }
+}

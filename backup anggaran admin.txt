@@ -1,0 +1,1232 @@
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+// 1. External Libraries (Firebase, Chart.js)
+import { db, auth } from '../../firebase/firebaseConfig';
+import { 
+    collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, 
+    query, orderBy, getDocs, setDoc 
+} from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import { Bar, Doughnut } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
+
+// 2. External Components/Icons (lucide-react)
+import { Landmark, Plus, X, Save, Trash2, Pencil, Wallet, Filter, ArrowLeft, List, Edit3, Link as LinkIcon, CalendarDays, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Info, Search } from 'lucide-react';
+
+// 3. Local Files/Utilities
+import { logActivity } from "../../utils/logActivity";
+
+// 4. IMPORT CSS (Diasumsikan file berada di folder yang sama)
+import './AdminAnggaran.css';
+
+// 5. Pendaftaran Fungsi
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement); 
+
+const calculateTotalRealisasi = (item) => {
+    // Di Admin, kita biasanya hanya perlu nilai yang tersimpan,
+    // tapi fungsi ini penting jika Admin mengandalkan rincian
+    if (item.rincianPengeluaran && item.rincianPengeluaran.length > 0) {
+        return item.rincianPengeluaran.reduce((sum, r) => sum + Number(r.jumlah || 0), 0);
+    }
+    return Number(item.totalRealisasi || 0);
+};
+
+// --- UTILITY FUNCTION ---
+const formatRupiah = (number) => {
+    if (number === null || number === undefined || number === '') return '0';
+    const value = String(number).replace(/\D/g, "");
+    if (value === "") return "0";
+    return Number(value).toLocaleString('id-ID');
+};
+
+const cleanRupiah = (value) => {
+    if (!value) return '';
+    return String(value).replace(/\D/g, "");
+};
+
+// --- KONSTANTA ---
+const ITEMS_PER_PAGE = 10;
+const ormawaOptions = [ 
+    "BEM", "MM", "DPM", 
+    "Hima EMC", "Hima Einsten.com", "Hima TKN", 
+    "UKM Kalam", "UKM Walang", "UKM Robotika", 
+    "UKM Seni", "UKM Riset", "UKM Voli", 
+    "UKM Basket", "UKM Badminton", "UKM Beladiri", 
+    "UKM Futsal", "UKM PMK" 
+];
+const statusOptions = ["Perencanaan", "Disetujui", "Berjalan", "Selesai", "Dibatalkan", "SPJ Masuk"];
+const chartStatusCategories = ["Disetujui", "Selesai (Realisasi)", "SPJ Masuk (Realisasi)", "Berjalan (Realisasi)", "Dibatalkan", "Sisa Pelaksanaan"];
+
+// Palet Warna untuk Status Program
+const STATUS_COLORS = {
+    "Perencanaan": '#94a3b8', // Tidak akan muncul di chart baru
+    "Disetujui": '#3b82f6',     // Biru
+    "Berjalan (Realisasi)": '#f97316', // Oranye
+    "Selesai (Realisasi)": '#10b981',  // Hijau
+    "Dibatalkan": '#dc2626',    // Merah
+    "SPJ Masuk (Realisasi)": '#a855f7', // Ungu
+    "Sisa Pelaksanaan": '#facc15'    // Kuning
+};
+
+// --- UI COMPONENTS ---
+const Toast = ({ message, clear }) => {
+    useEffect(() => { const timer = setTimeout(clear, 3000); return () => clearTimeout(timer); }, [clear]);
+    return <div className="toast">{message}</div>;
+};
+const ConfirmationModal = ({ modalState, setModalState }) => {
+    if (!modalState.show) return null;
+    return ( 
+        <div className="modal-overlay">
+            <div className="modal-content small-modal">
+                <h3 className="modal-title">{modalState.message}</h3>
+                <div className="modal-actions">
+                    <button onClick={modalState.onConfirm} className="button button-danger">Ya, Hapus</button>
+                    <button onClick={() => setModalState({ show: false })} className="button button-secondary">Batal</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+const EmptyState = ({ text, subtext }) => (
+    <div className="empty-state">
+        <Landmark size={48} /><p className="empty-state-text">{text}</p><p className="empty-state-subtext">{subtext}</p>
+    </div>
+);
+
+
+// --- SBM MODAL COMPONENT ---
+const SbmModal = ({ isSbmModalOpen, setIsSbmModalOpen, sbmData, sbmItemInput, handleSaveSbm, handleSbmInputChange, handleAddSbmItem, handleRemoveSbmItem, sbmTahunAktif, setSbmTahunAktif }) => {
+    if (!isSbmModalOpen) return null;
+
+    return (
+        <div className="modal-overlay">
+            <div className="modal-content large" style={{maxWidth: '900px'}}>
+                <div className="modal-header">
+                    <h3>{sbmData.judul} TAHUN {sbmTahunAktif}</h3>
+                    <button onClick={() => setIsSbmModalOpen(false)} className="close-button"><X size={20}/></button>
+                </div>
+                <div className="modal-body sbm-form-body">
+                    
+                    {/* PILIHAN TAHUN SBM */}
+                    <div className="form-section year-select-section">
+                        <div className="form-group" style={{maxWidth: '250px'}}>
+                            <label className="label">Pilih / Input Tahun SBM</label>
+                            <input 
+                                type="number" 
+                                value={sbmTahunAktif} 
+                                onChange={e => setSbmTahunAktif(Number(e.target.value))} 
+                                className="input" 
+                                placeholder="Cth: 2026"
+                                min="2020"
+                            />
+                        </div>
+                    </div>
+                    
+                    <h4 className="form-section-title mt-24">Daftar Biaya Saat Ini ({sbmData.rincianSbm.length} item)</h4>
+                    
+                    {/* LIST ITEM SBM YANG SUDAH ADA */}
+                    <div className="sbm-item-list">
+                        {sbmData.rincianSbm.length === 0 ? (
+                            <EmptyState text="Belum ada item SBM" subtext={`SBM Tahun ${sbmTahunAktif} belum memiliki data. Tambahkan data di bawah.`}/>
+                        ) : (
+                            <div className="sbm-table-container">
+                                <table className="sbm-table">
+                                    <thead>
+                                        <tr><th style={{width: '15%'}}>Kategori</th><th style={{width: '20%'}}>Rincian</th><th style={{width: '10%'}}>Satuan</th><th className="text-right" style={{width: '15%'}}>Harga (Rp)</th><th style={{width: '35%'}}>Ketentuan</th><th style={{width: '5%'}}></th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {sbmData.rincianSbm.map((item, index) => ( 
+                                            <tr key={item.id || index}>
+                                                <td>{item.kategori}</td>
+                                                <td className="text-normal">{item.rincian}</td>
+                                                <td>{item.satuan}</td>
+                                                <td className="text-right">Rp {Number(item.harga).toLocaleString('id-ID')}</td>
+                                                <td>{item.ketentuan}</td>
+                                                <td><button type="button" onClick={() => handleRemoveSbmItem(item.id || index)} className="button-icon-small danger"><X size={12}/></button></td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                    
+                    {/* INPUT ITEM SBM BARU */}
+                    <h4 className="form-section-title mt-24">Tambah Item Baru</h4>
+                    {/* Baris Input 1: Kategori, Rincian, Satuan, Harga */}
+                    <div className="form-grid-2-col sbm-input-grid">
+                        <input name="kategori" value={sbmItemInput.kategori} onChange={handleSbmInputChange} className="input" placeholder="Kategori" />
+                        <input name="rincian" value={sbmItemInput.rincian} onChange={handleSbmInputChange} className="input" placeholder="Rincian" />
+                        <input name="satuan" value={sbmItemInput.satuan} onChange={handleSbmInputChange} className="input" placeholder="Satuan" />
+                        
+                        {/* Input Harga dengan Ikon */}
+                        <div className="input-with-icon">
+                            <Wallet size={16}/>
+                            <input name="harga" type="text" value={formatRupiah(sbmItemInput.harga)} onChange={handleSbmInputChange} className="input" placeholder="Harga (Rp)" />
+                        </div>
+                    </div>
+                    
+                    {/* Baris Input 2: Ketentuan Lanjutan dan Tombol Tambah */}
+                    <div className="form-group-flex sbm-action-flex-bottom">
+                        {/* Input Ketentuan Lanjutan */}
+                        <input name="ketentuan" value={sbmItemInput.ketentuan} onChange={handleSbmInputChange} className="input" placeholder="Ketentuan Lanjutan (Opsional)" style={{flex: 1}}/>
+                        
+                        {/* Tombol Tambah Item */}
+                        <div style={{display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0}}>
+                            <button type="button" onClick={handleAddSbmItem} className="button button-primary"><Plus size={16}/> Tambah Item</button>
+                        </div>
+                    </div>
+
+                    <p className="note mt-16"><Info size={14} style={{marginRight: '5px'}}/>Harga harus dimasukkan tanpa titik/koma. Item yang ada akan disimpan dengan tahun **{sbmTahunAktif}**.</p>
+
+                </div>
+                <div className="modal-actions">
+                    <button onClick={() => setIsSbmModalOpen(false)} className="button button-secondary">Tutup</button>
+                    <button onClick={handleSaveSbm} className="button button-success"><Save size={16}/> Simpan Perubahan SBM</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
+// --- KOMPONEN DASHBOARD CHARTS ---
+const DashboardCharts = ({ rekapitulasiList, rekapGrandTotal, statusDistributionModified, rankedListDesc, rankedListAsc }) => {
+    
+    // Data Pemeringkatan
+    const topOrmawa = rankedListDesc.slice(0, 5);
+    const bottomOrmawa = rankedListAsc.slice(0, 5); 
+    
+    // Chart 1: Global Serapan (Total Disetujui vs Realisasi)
+    const globalDoughnutData = {
+        labels: ['Total Realisasi', 'Sisa Anggaran'],
+        datasets: [
+            {
+                data: [rekapGrandTotal.terlaksana, rekapGrandTotal.sisa > 0 ? rekapGrandTotal.sisa : 0],
+                backgroundColor: ['#10b981', '#3b82f6'], 
+                hoverBackgroundColor: ['#059669', '#1d4ed8'],
+                borderWidth: 0,
+            },
+        ],
+    };
+
+    const globalDoughnutOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'bottom', align: 'start', labels: { padding: 15 } },
+            title: { display: false }
+        },
+    };
+    
+    // Chart 2: Status Program
+    const statusDoughnutDataModified = {
+        // Gunakan nama kategori dari data yang dimodifikasi
+        labels: statusDistributionModified.chartData.map(d => `${d.kategori} (Rp ${formatRupiah(d.nilai)})`),
+        datasets: [
+            {
+                // Gunakan nilai dari data yang dimodifikasi
+                data: statusDistributionModified.chartData.map(d => d.nilai),
+                // Gunakan warna berdasarkan nama kategori
+                backgroundColor: statusDistributionModified.chartData.map(d => STATUS_COLORS[d.kategori] || '#ccc'),
+                hoverOffset: 4,
+                borderWidth: 0,
+            },
+        ],
+    };
+
+    const statusDoughnutOptionsModified = { 
+        responsive: true, 
+        maintainAspectRatio: false,
+        plugins: { 
+            legend: { position: 'bottom', align: 'start', labels: { padding: 15 } },
+            title: { display: false } 
+        },
+    };
+    
+    // Chart 3: Top 5 Bar Chart (Serapan Tertinggi)
+    const barDataTop = {
+        labels: topOrmawa.map(o => o.ormawa),
+        datasets: [
+            { 
+                label: 'Anggaran Disetujui', 
+                data: topOrmawa.map(o => o.disetujui), 
+                backgroundColor: '#3b82f6',
+                borderRadius: 4
+            },
+            { 
+                label: 'Total Realisasi', 
+                data: topOrmawa.map(o => o.terlaksana), 
+                backgroundColor: '#10b981',
+                borderRadius: 4
+            },
+        ],
+    };
+
+    const barOptions = { 
+        responsive: true, 
+        maintainAspectRatio: false,
+        plugins: { 
+            legend: { position: 'top' }, 
+            title: { display: false } 
+        },
+        scales: { y: { beginAtZero: true } }
+    };
+    
+    // Komponen Bottom 5 (List/Table) DITINGKATKAN
+    const BottomFiveList = () => (
+        <div className="rekap-list item-list bottom-list">
+            {bottomOrmawa.length > 0 ? bottomOrmawa.map((item, index) => (
+                <div key={item.ormawa} className="list-item-condensed rekap-item small-item">
+                    <div className="item-main-info">
+                        {/* #Ranking berdasarkan urutan terendah */}
+                        <strong># {index + 1} &nbsp; {item.ormawa}</strong>
+                        <small className="text-danger">{item.persentaseSerapan.toFixed(1)}% Serapan</small>
+                    </div>
+                    
+                    <div className="item-rekap-stats-small">
+                        <div>
+                            <small>Disetujui</small>
+                            <strong>Rp {Number(item.disetujui).toLocaleString('id-ID')}</strong>
+                        </div>
+                        <div>
+                            <small>Realisasi</small>
+                            {/* Warna berdasarkan tingkat serapan */}
+                            <strong className={item.persentaseSerapan < 25 ? 'text-danger' : item.persentaseSerapan < 50 ? 'text-warning' : 'text-success'}>
+                                Rp {Number(item.terlaksana).toLocaleString('id-ID')}
+                            </strong>
+                        </div>
+                    </div>
+                </div>
+            )) : <EmptyState text="Semua Ormawa Efisien" subtext="Semua program sudah selesai atau hampir 100% terserap."/>}
+        </div>
+    );
+
+
+    return (
+        <div className="chart-grid">
+            
+            {/* Chart 1: Global Serapan Dana */}
+            <div className="card chart-card chart-span-1">
+                <h4 className="card-title"><Wallet size={20} style={{marginRight: '8px'}}/> Global Serapan Dana ({rekapGrandTotal.persentaseRealisasi.toFixed(1)}%)</h4>
+                <div className="chart-container-wrapper chart-small-doughnut">
+                    <Doughnut data={globalDoughnutData} options={globalDoughnutOptions} /> 
+                </div>
+            </div>
+
+            {/* Chart 2: Distribusi Status Program */}
+            <div className="card chart-card chart-span-1">
+                <h4 className="card-title"><List size={20} style={{marginRight: '8px'}}/> Distribusi Dana Berdasarkan Status</h4>
+                <div className="chart-container-wrapper">
+                    {/* Gunakan totalNilai dari prop baru */}
+                    {statusDistributionModified.totalNilai > 0 ? (
+                        <Doughnut data={statusDoughnutDataModified} options={statusDoughnutOptionsModified} />
+                    ) : (
+                        <EmptyState text="Data Status Belum Tersedia" subtext="Belum ada data anggaran yang relevan untuk chart ini."/>
+                    )}
+                </div>
+            </div>
+
+            {/* Chart 3: Bar Chart - Top 5 Ormawa TERTINGGI */}
+            <div className="card chart-card chart-span-1">
+                <h4 className="card-title"><TrendingUp size={20} style={{marginRight: '8px'}}/> Top 5 Ormawa Serapan Tertinggi</h4>
+                <div className="chart-container-wrapper chart-bar-medium">
+                    {topOrmawa.length > 0 ? (
+                        <Bar options={barOptions} data={barDataTop} /> 
+                    ) : (
+                        <EmptyState text="Data Ranking Belum Tersedia" subtext="Tidak cukup data anggaran untuk membuat ranking."/>
+                    )}
+                </div>
+            </div>
+            
+            {/* Chart 4: Bottom 5 Ormawa TERENDAH */}
+            <div className="card chart-card chart-span-1">
+                <h4 className="card-title"><TrendingDown size={20} style={{marginRight: '8px'}}/> Bottom 5 Ormawa Serapan Terendah</h4>
+                <div className="bottom-list-container">
+                    <BottomFiveList />
+                </div>
+            </div>
+            
+        </div>
+    );
+};
+
+
+// --- MAIN COMPONENT: AdminAnggaran ---
+const AdminAnggaran = () => {
+    const navigate = useNavigate();
+    
+    // --- STATE PENGELOLAAN ANGGARAN ---
+    const [anggaranList, setAnggaranList] = useState([]);
+    const [prokerBemList, setProkerBemList] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [toastMessage, setToastMessage] = useState('');
+    const [confirmProps, setConfirmProps] = useState({ show: false });
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingId, setEditingId] = useState(null);
+    const [modeRealisasi, setModeRealisasi] = useState('rincian');
+    const [filters, setFilters] = useState({ tahun: 'Semua', ormawa: 'Semua', status: 'Semua', search: '' });
+    const [currentPage, setCurrentPage] = useState(1);
+
+    const initialFormState = {
+        namaProgram: '', ormawa: ormawaOptions[0], 
+        totalDiajukan: '', // Field Total Diajukan
+        totalAnggaran: '', // Nilai Disetujui
+        totalRealisasi: '', status: statusOptions[0],
+        tahun: new Date().getFullYear(), tanggalKegiatan: '', tautanProker: '', rincianPengeluaran: [], linkSPJ: '',
+    };
+    const initialRincianState = { deskripsi: '', jumlah: '', tanggal: new Date().toISOString().slice(0, 10) };
+    const [formState, setFormState] = useState(initialFormState);
+    const [rincian, setRincian] = useState(initialRincianState);
+
+    // --- STATE SBM ---
+    const [isSbmModalOpen, setIsSbmModalOpen] = useState(false);
+    const [sbmTahunAktif, setSbmTahunAktif] = useState(new Date().getFullYear());
+    const initialSbmItem = { kategori: '', rincian: '', satuan: '', harga: '', ketentuan: '' };
+    const [sbmItemInput, setSbmItemInput] = useState(initialSbmItem);
+
+    // STATE UNTUK MENYIMPAN DATA SBM DARI FIREBASE
+    const [sbmData, setSbmData] = useState({
+        tahun: new Date().getFullYear(),
+        judul: 'STANDAR BIAYA MASUKAN DANA KEMAHASISWAAN',
+        rincianSbm: [], 
+    });
+    // ----------------------
+
+    // --- EFFECT: FIREBASE & AUTH ---
+    useEffect(() => {
+        const unsubscribeAuth = onAuthStateChanged(auth, user => { if (!user) navigate('/login'); });
+        const qAnggaran = query(collection(db, "anggaran_program"), orderBy("tahun", "desc"), orderBy("namaProgram", "asc"));
+        const unsubAnggaran = onSnapshot(qAnggaran, snapshot => {
+            setAnggaranList(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+            setLoading(false);
+        });
+        const fetchProkerBEM = async () => {
+            const qProker = query(collection(db, "program_kerja"));
+            const snapshot = await getDocs(qProker);
+            setProkerBemList(snapshot.docs.map(d => ({ id: d.id, nama: d.data().namaProgram })));
+        };
+        fetchProkerBEM();
+        
+        // CATATAN: Logika injeksi CSS dihapus. Styling dimuat via import.
+        
+        return () => { 
+            unsubscribeAuth(); 
+            unsubAnggaran(); 
+        };
+    }, [navigate]);
+
+    // --- EFFECT KHUSUS UNTUK MENGAMBIL DATA SBM BERDASARKAN sbmTahunAktif ---
+    useEffect(() => {
+        const sbmDocRef = doc(db, "standar_biaya", String(sbmTahunAktif));
+        
+        const unsubSbm = onSnapshot(sbmDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                setSbmData(docSnap.data());
+            } else {
+                setSbmData({
+                    tahun: sbmTahunAktif,
+                    judul: 'STANDAR BIAYA MASUKAN DANA KEMAHASISWAAN',
+                    rincianSbm: [], 
+                });
+            }
+        });
+
+        return () => unsubSbm(); 
+
+    }, [sbmTahunAktif]); 
+
+    useEffect(() => {
+        setCurrentPage(1);
+        
+        if (isModalOpen && (formState.status !== 'Selesai' && formState.status !== 'SPJ Masuk')) {
+            setFormState(prev => ({ ...prev, linkSPJ: '' }));
+        }
+    }, [filters.tahun, filters.ormawa, filters.status, filters.search]);
+
+    const processedAnggaranList = useMemo(() => {
+        return anggaranList.map(item => ({
+            ...item,
+            calculatedRealisasi: calculateTotalRealisasi(item)
+        }));
+    }, [anggaranList]);
+    
+    
+    const filteredAnggaranList = useMemo(() => {
+        const normalizedYear = String(filters.tahun); 
+        const searchTerm = filters.search.toLowerCase(); // Ambil istilah pencarian
+
+        return processedAnggaranList.filter(item => { // BARIS 437 YANG ERROR
+            const isYearMatch = (normalizedYear === 'Semua' || String(item.tahun) === normalizedYear);
+            const isOrmawaMatch = (filters.ormawa === 'Semua' || item.ormawa === filters.ormawa);
+            const isStatusMatch = (filters.status === 'Semua' || item.status === filters.status);
+            
+            // Filter 4: Pencarian Teks (BARU)
+            const isSearchMatch = item.namaProgram.toLowerCase().includes(searchTerm);
+            
+            // Gabungkan semua filter
+            return isYearMatch && isOrmawaMatch && isStatusMatch && isSearchMatch;
+        });
+    }, [processedAnggaranList, filters]);
+
+    const paginatedAnggaranList = useMemo(() => {
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        const endIndex = startIndex + ITEMS_PER_PAGE;
+        return filteredAnggaranList.slice(startIndex, endIndex);
+    }, [filteredAnggaranList, currentPage]);
+    
+    const totalPages = useMemo(() => {
+        return Math.ceil(filteredAnggaranList.length / ITEMS_PER_PAGE);
+    }, [filteredAnggaranList]);
+
+    const availableYears = useMemo(() => {
+        // 1. Map: Ambil nilai tahun, dan pastikan diubah menjadi STRING
+        const rawYears = anggaranList.map(item => String(item.tahun));
+        
+        // 2. Set: Buat array unik
+        const uniqueYears = Array.from(new Set(rawYears));
+        
+        // 3. Sort: Urutkan dari tahun terbaru ke terlama (sebagai angka)
+        uniqueYears.sort((a, b) => Number(b) - Number(a));
+        
+        // 4. Gabungkan dengan opsi 'Semua'
+        return ['Semua', ...uniqueYears];
+    }, [anggaranList]);
+    
+    // --- LOGIC REKAPITULASI DANA & PEMERINGKATAN (GLOBAL) ---
+    const rekapitulasiDana = useMemo(() => {
+        const dataToProcess = anggaranList; 
+        
+        const totals = ormawaOptions.reduce((acc, ormawa) => {
+            acc[ormawa] = { diajukan: 0, disetujui: 0, terlaksana: 0 };
+            return acc;
+        }, {});
+
+        let grandTotalDiajukan = 0;
+        let grandTotalDisetujui = 0;
+        let grandTotalTerlaksana = 0;
+        
+        dataToProcess.forEach(item => {
+            const ormawa = item.ormawa;
+            if (totals[ormawa]) {
+                const disetujui = Number(item.totalAnggaran || 0);
+                const terlaksana = Number(item.totalRealisasi || 0);
+                const diajukan = Number(item.totalDiajukan || item.totalAnggaran || 0); 
+
+                totals[ormawa].diajukan += diajukan; 
+                totals[ormawa].disetujui += disetujui;
+                totals[ormawa].terlaksana += terlaksana;
+                
+                grandTotalDiajukan += diajukan;
+                grandTotalDisetujui += disetujui;
+                grandTotalTerlaksana += terlaksana;
+            }
+        });
+
+        let result = ormawaOptions.map(ormawa => {
+            const data = totals[ormawa];
+            const sisa = data.disetujui - data.terlaksana;
+            const position = ormawaOptions.indexOf(ormawa); 
+            return {
+                ormawa,
+                diajukan: data.diajukan,
+                disetujui: data.disetujui,
+                terlaksana: data.terlaksana,
+                sisa,
+                persentaseSerapan: data.disetujui > 0 ? (data.terlaksana / data.disetujui) * 100 : 0,
+                position: position 
+            }
+        }).filter(item => item.diajukan > 0 || item.disetujui > 0);
+        
+        // List 1: Diurutkan Berdasarkan Persentase Serapan TERTINGGI (Top 5)
+        const sortedBySerapanDescending = [...result].sort((a, b) => b.persentaseSerapan - a.persentaseSerapan);
+
+        // List 2: Diurutkan Berdasarkan Persentase Serapan TERENDAH (Bottom 5)
+        const sortedBySerapanAscending = [...result]
+            .filter(item => item.disetujui > 0)
+            .sort((a, b) => a.persentaseSerapan - b.persentaseSerapan);
+        
+        // List 3: Diurutkan Berdasarkan Nama ORMAWA (untuk tampilan Rekap utama)
+        const sortedByOrmawaName = [...result].sort((a, b) => a.ormawa.localeCompare(b.ormawa));
+
+        const grandTotal = {
+            diajukan: grandTotalDiajukan,
+            disetujui: grandTotalDisetujui,
+            terlaksana: grandTotalTerlaksana,
+            sisa: grandTotalDisetujui - grandTotalTerlaksana,
+            persentaseRealisasi: grandTotalDisetujui > 0 ? (grandTotalTerlaksana / grandTotalDisetujui) * 100 : 0
+        };
+
+        return { 
+            list: sortedByOrmawaName, 
+            rankedListDesc: sortedBySerapanDescending, 
+            rankedListAsc: sortedBySerapanAscending, 
+            grandTotal 
+        }; 
+
+    }, [anggaranList]);
+    
+    // --- LOGIC DISTRIBUSI STATUS PROGRAM ---
+    const statusDistributionModified = useMemo(() => {
+        // Inisialisasi dengan kategori baru
+        const distribution = chartStatusCategories.reduce((acc, kategori) => { acc[kategori] = 0; return acc; }, {});
+        let totalNilai = 0; // Total nilai yang masuk ke chart
+
+        anggaranList.forEach(item => {
+            const status = item.status || 'Perencanaan';
+            const anggaranDisetujui = Number(item.totalAnggaran || 0);
+            const realisasi = Number(item.totalRealisasi || 0);
+
+            if (status === 'Disetujui') {
+                distribution['Disetujui'] += anggaranDisetujui;
+                totalNilai += anggaranDisetujui;
+            } else if (status === 'Selesai') {
+                distribution['Selesai (Realisasi)'] += realisasi;
+                totalNilai += realisasi;
+            } else if (status === 'SPJ Masuk') {
+                 distribution['SPJ Masuk (Realisasi)'] += realisasi;
+                 totalNilai += realisasi;
+            } else if (status === 'Berjalan') {
+                distribution['Berjalan (Realisasi)'] += realisasi;
+                totalNilai += realisasi; // Tambahkan realisasi ke total
+                // Hitung dan tambahkan sisa pelaksanaan
+                const sisa = anggaranDisetujui - realisasi;
+                if (sisa > 0) {
+                    distribution['Sisa Pelaksanaan'] += sisa;
+                    // Sisa pelaksanaan TIDAK ditambahkan ke totalNilai karena itu bagian dari 'Disetujui' yg belum terpakai
+                }
+            } else if (status === 'Dibatalkan') {
+                distribution['Dibatalkan'] += anggaranDisetujui; // Atau mungkin 0 jika dibatalkan tidak dihitung? Asumsi dihitung.
+                totalNilai += anggaranDisetujui;
+            }
+            // Status "Perencanaan" diabaikan untuk chart ini
+        });
+
+        // Ubah format untuk chart, hapus kategori dengan nilai 0
+        const chartData = Object.keys(distribution)
+            .filter(kategori => distribution[kategori] > 0)
+            .map(kategori => ({
+                kategori: kategori, // Gunakan nama kategori baru
+                nilai: distribution[kategori] // Nilai yang dijumlahkan
+            }));
+
+        // Urutkan berdasarkan urutan di chartStatusCategories untuk konsistensi warna
+        chartData.sort((a, b) => chartStatusCategories.indexOf(a.kategori) - chartStatusCategories.indexOf(b.kategori));
+
+
+        // Total nilai di sini mungkin tidak sama dengan total anggaran disetujui
+        // karena beberapa status menggunakan realisasi.
+        return { chartData, totalNilai };
+
+    }, [anggaranList]);
+    
+    // Destructure Rekapitulasi
+    const { list: rekapitulasiList, rankedListDesc, rankedListAsc, grandTotal: rekapGrandTotal } = rekapitulasiDana;
+
+    // --- HANDLERS ANGGARAN & SBM ---
+    const handleFormChange = (e) => setFormState(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    
+    const handleCurrencyChange = useCallback((e) => {
+        const { name, value } = e.target;
+        const rawValue = cleanRupiah(value);
+        setFormState(prev => ({ ...prev, [name]: rawValue }));
+    }, []);
+
+    const handleRincianCurrencyChange = useCallback((e) => {
+        const { name, value } = e.target;
+        const rawValue = cleanRupiah(value);
+        setRincian(prev => ({ ...prev, [name]: rawValue }));
+    }, []);
+
+    const handleRincianChange = (e) => {
+        const { name, value } = e.target;
+        if (name !== 'jumlah') { setRincian(prev => ({ ...prev, [name]: value })); }
+    };
+
+    const handleTambahRincian = () => {
+        if (!rincian.deskripsi.trim() || !rincian.jumlah || Number(cleanRupiah(rincian.jumlah)) <= 0) { return alert("Deskripsi dan Jumlah pengeluaran harus diisi dengan nilai positif."); }
+        const rawJumlah = cleanRupiah(rincian.jumlah);
+        const newRincian = [...formState.rincianPengeluaran, { deskripsi: rincian.deskripsi, jumlah: Number(rawJumlah), tanggal: rincian.tanggal, id: Date.now() }];
+        const newRealisasi = newRincian.reduce((sum, item) => sum + Number(item.jumlah), 0);
+        setFormState(prev => ({ ...prev, rincianPengeluaran: newRincian, totalRealisasi: String(newRealisasi) }));
+        setRincian(initialRincianState);
+    };
+
+    const handleHapusRincian = (id) => {
+        const newRincian = formState.rincianPengeluaran.filter(item => item.id !== id);
+        const newRealisasi = newRincian.reduce((sum, item) => sum + Number(item.jumlah), 0);
+        setFormState(prev => ({ ...prev, rincianPengeluaran: newRincian, totalRealisasi: String(newRealisasi) }));
+    };
+
+    const handleSimpan = async (e) => {
+        e.preventDefault();
+        
+        let finalTotalRealisasi;
+        let finalRincianPengeluaran = [];
+
+        if (modeRealisasi === 'rekap') {
+            finalTotalRealisasi = Number(formState.totalRealisasi || 0);
+            finalRincianPengeluaran = []; 
+        } else {
+            finalRincianPengeluaran = formState.rincianPengeluaran.map(r => ({
+                ...r,
+                jumlah: Number(r.jumlah || 0) 
+            }));
+            finalTotalRealisasi = finalRincianPengeluaran.reduce((sum, item) => sum + Number(item.jumlah), 0);
+        }
+
+        const dataToSave = { 
+            ...formState, 
+            tahun: Number(formState.tahun), 
+            totalDiajukan: Number(formState.totalDiajukan || 0),
+            totalAnggaran: Number(formState.totalAnggaran || 0), 
+            totalRealisasi: finalTotalRealisasi,
+            rincianPengeluaran: finalRincianPengeluaran,
+        };
+        
+        const isPerencanaan = dataToSave.status === 'Perencanaan';
+        
+        if (!isPerencanaan && dataToSave.totalAnggaran <= 0) { 
+            return setToastMessage('Gagal: Program selain Perencanaan wajib memiliki Total Anggaran Disetujui (> Rp 0).'); 
+        }
+
+        if (dataToSave.totalAnggaran < 0) {
+            return setToastMessage('Gagal: Total Anggaran Disetujui tidak boleh negatif.');
+        }
+        
+        try {
+            if (editingId) {
+                await updateDoc(doc(db, "anggaran_program", editingId), dataToSave);
+                await logActivity(`Memperbarui anggaran: "${dataToSave.namaProgram}"`);
+                setToastMessage('Program anggaran berhasil diperbarui!');
+            } else {
+                await addDoc(collection(db, "anggaran_program"), dataToSave);
+                await logActivity(`Menambahkan anggaran: "${dataToSave.namaProgram}"`);
+                setToastMessage('Program anggaran berhasil ditambahkan!');
+            }
+            closeModal();
+        } catch (error) {
+            console.error("Gagal menyimpan anggaran:", error);
+            setToastMessage('Gagal menyimpan anggaran: ' + error.message);
+        }
+    };
+
+    const handleEdit = (item) => {
+        setFormState({ 
+            ...initialFormState, 
+            ...item, 
+            totalDiajukan: String(item.totalDiajukan || item.totalAnggaran || ''),
+            totalAnggaran: String(item.totalAnggaran || ''), 
+            totalRealisasi: String(item.totalRealisasi || 0) 
+        });
+        setEditingId(item.id);
+        setModeRealisasi(item.rincianPengeluaran && item.rincianPengeluaran.length > 0 ? 'rincian' : 'rekap');
+        setIsModalOpen(true);
+    };
+
+    const handleHapus = (id, namaProgram) => {
+        setConfirmProps({ show: true, message: `Yakin ingin menghapus program anggaran "${namaProgram}"?`,
+            onConfirm: async () => {
+                try {
+                    await deleteDoc(doc(db, "anggaran_program", id));
+                    await logActivity(`Menghapus anggaran: "${namaProgram}"`);
+                    setToastMessage('Program anggaran berhasil dihapus!');
+                    setConfirmProps({ show: false });
+                } catch (error) {
+                    setToastMessage('Gagal menghapus anggaran: ' + error.message);
+                    setConfirmProps({ show: false });
+                }
+            }
+        });
+    };
+
+    const openModalTambah = () => {
+        setEditingId(null); setFormState(initialFormState); setModeRealisasi('rincian'); setRincian(initialRincianState); setIsModalOpen(true);
+    };
+
+    const closeModal = () => {
+        setIsModalOpen(false); setEditingId(null); setRincian(initialRincianState);
+    };
+
+    const currentTotalRealisasi = useMemo(() => {
+        if (modeRealisasi === 'rekap') { return Number(formState.totalRealisasi || 0); }
+        return formState.rincianPengeluaran.reduce((sum, item) => sum + Number(item.jumlah || 0), 0);
+    }, [formState.rincianPengeluaran, formState.totalRealisasi, modeRealisasi]);
+    
+    // --- SBM HANDLERS (Dideklarasikan di scope AdminAnggaran) ---
+    const handleSbmInputChange = (e) => {
+        const { name, value } = e.target;
+        if (name === 'harga') {
+            const rawValue = cleanRupiah(value);
+            setSbmItemInput(prev => ({ ...prev, [name]: rawValue }));
+        } else {
+            setSbmItemInput(prev => ({ ...prev, [name]: value }));
+        }
+    };
+    
+    const handleAddSbmItem = () => {
+        const { kategori, rincian, harga } = sbmItemInput;
+        if (!kategori || !rincian || !harga || Number(cleanRupiah(harga)) <= 0) {
+            return setToastMessage("Kategori, Rincian, dan Harga SBM harus diisi dengan nilai positif.");
+        }
+        
+        const newItem = { ...sbmItemInput, harga: cleanRupiah(harga), id: Date.now() };
+        
+        setSbmData(prev => ({ ...prev, rincianSbm: [...prev.rincianSbm, newItem] }));
+        setSbmItemInput(initialSbmItem);
+    };
+    
+    const handleRemoveSbmItem = (idToRemove) => {
+        setSbmData(prev => ({ 
+            ...prev, 
+            rincianSbm: prev.rincianSbm.filter(item => (item.id || item.rincian) !== idToRemove) 
+        }));
+    };
+    
+    const handleSaveSbm = async () => {
+        try {
+            const dataToSave = {
+                tahun: Number(sbmTahunAktif),
+                judul: sbmData.judul, 
+                rincianSbm: sbmData.rincianSbm.map(item => ({
+                    id: item.id || Date.now(), 
+                    kategori: item.kategori,
+                    rincian: item.rincian,
+                    satuan: item.satuan,
+                    harga: Number(item.harga), 
+                    ketentuan: item.ketentuan
+                }))
+            };
+
+            const sbmDocRef = doc(db, "standar_biaya", String(sbmTahunAktif));
+            await setDoc(sbmDocRef, dataToSave, { merge: false }); 
+
+            await logActivity(`Memperbarui SBM Tahun ${sbmTahunAktif}`);
+            setToastMessage(`SBM Tahun ${sbmTahunAktif} berhasil disimpan!`);
+            setIsSbmModalOpen(false);
+            
+        } catch (error) {
+            console.error("Gagal menyimpan SBM:", error);
+            setToastMessage("Gagal menyimpan SBM: Pastikan Anda memiliki izin Admin/Master. " + error.message);
+        }
+    };
+
+    // --- HANDLER BARU: EXPORT DATA KE CSV ---
+    const exportToCsv = (data, filename) => {
+        if (!data || data.length === 0) {
+            setToastMessage("Tidak ada data untuk diexport.");
+            return;
+        }
+
+        const headers = [
+            'ID', 'Nama Program', 'Ormawa', 'Tahun', 'Tanggal Kegiatan', 'Status', 
+            'Total Diajukan', 'Total Disetujui', 'Total Realisasi', 'Sisa Dana', 
+            'Link SPJ', 'Rincian Pengeluaran Lengkap'
+        ];
+        
+        const rows = data.map(item => {
+            const rincianText = item.rincianPengeluaran && item.rincianPengeluaran.length > 0
+                ? item.rincianPengeluaran.map(r => `${r.deskripsi} (@${formatRupiah(r.jumlah)})`).join('; ')
+                : 'Mode Rekap';
+            
+            // Mengubah format Rupiah menjadi angka bersih/format standar untuk CSV
+            const formatCurrencyCsv = (num) => String(num || 0).replace('.', ',');
+
+            return [
+                item.id,
+                `"${item.namaProgram.replace(/"/g, '""')}"`, // Bungkus dengan kutip ganda untuk teks panjang/koma
+                item.ormawa,
+                item.tahun,
+                item.tanggalKegiatan || '-',
+                item.status || 'Perencanaan',
+                formatCurrencyCsv(item.totalDiajukan),
+                formatCurrencyCsv(item.totalAnggaran),
+                formatCurrencyCsv(item.totalRealisasi),
+                formatCurrencyCsv(Number(item.totalAnggaran || 0) - Number(item.totalRealisasi || 0)), // Hitung Sisa Dana
+                item.linkSPJ || '-',
+                `"${rincianText.replace(/"/g, '""')}"`
+            ].join(',');
+        });
+
+        // Gabungkan header dan baris data
+        const csvContent = [headers.join(','), ...rows].join('\n');
+
+        // Buat Blob dan download
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        if (link.download !== undefined) {
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setToastMessage("Data berhasil diexport!");
+        }
+    };
+    
+    // Handler Pemicu
+    const handleExport = () => {
+        const date = new Date().toISOString().slice(0, 10);
+        exportToCsv(filteredAnggaranList, `anggaran_ormawa_${date}.csv`);
+    };
+    
+    // Fungsi untuk membuat tombol Pagination 
+    const renderPaginationControls = () => {
+        if (totalPages <= 1) return null;
+        
+        const goToPage = (page) => {
+            if (page >= 1 && page <= totalPages) {
+                setCurrentPage(page);
+            }
+        };
+
+        // Logika untuk menampilkan tombol angka (Maksimal 5)
+        const getPageNumbers = () => {
+            const pages = [];
+            const maxPagesToShow = 5; 
+            let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
+            let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+            
+            // Penyesuaian agar selalu menampilkan 5 tombol jika memungkinkan
+            if (endPage - startPage < maxPagesToShow - 1) {
+                startPage = Math.max(1, endPage - maxPagesToShow + 1);
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                pages.push(i);
+            }
+            return pages;
+        };
+
+        const pageNumbers = getPageNumbers();
+
+        return (
+            <div className="pagination-controls">
+                <button 
+                    onClick={() => goToPage(currentPage - 1)} 
+                    disabled={currentPage === 1} 
+                    className="button button-secondary button-icon"
+                >
+                    <ChevronLeft size={16}/> Sebelumnya
+                </button>
+                
+                {/* TOMBOL ANGKA BARU */}
+                <div className="page-numbers-group">
+                    {pageNumbers.map(number => (
+                        <button
+                            key={number}
+                            className={`pagination-number ${number === currentPage ? 'active' : ''}`}
+                            onClick={() => goToPage(number)}
+                        >
+                            {number}
+                        </button>
+                    ))}
+                </div>
+                
+                <button 
+                    onClick={() => goToPage(currentPage + 1)} 
+                    disabled={currentPage === totalPages} 
+                    className="button button-secondary button-icon"
+                >
+                    Berikutnya <ChevronRight size={16}/>
+                </button>
+            </div>
+        );
+    };
+
+
+    return (
+        <div className="admin-page">
+            <ConfirmationModal modalState={confirmProps} setModalState={setConfirmProps} />
+            {toastMessage && <Toast message={toastMessage} clear={() => setToastMessage('')} />}
+
+            {/* Modal SBM Baru */}
+            {isSbmModalOpen && <SbmModal 
+                isSbmModalOpen={isSbmModalOpen} 
+                setIsSbmModalOpen={setIsSbmModalOpen} 
+                sbmData={sbmData} 
+                sbmItemInput={sbmItemInput}
+                handleSaveSbm={handleSaveSbm} 
+                handleSbmInputChange={handleSbmInputChange} 
+                handleAddSbmItem={handleAddSbmItem} 
+                handleRemoveSbmItem={handleRemoveSbmItem}
+                sbmTahunAktif={sbmTahunAktif}
+                setSbmTahunAktif={setSbmTahunAktif}
+            />}
+
+            {/* Modal Edit/Tambah Anggaran */}
+            {isModalOpen && (
+                <div className="modal-overlay">
+                    <div className="modal-content large">
+                        <div className="modal-header">
+                            <h3>{editingId ? 'Edit Program Anggaran' : 'Tambah Program Anggaran Baru'}</h3>
+                            <button onClick={closeModal} className="close-button"><X size={20}/></button>
+                        </div>
+                        <form onSubmit={handleSimpan} className="modal-form">
+                            <div className="modal-body">
+                                <div className="form-section">
+                                    <h4 className="form-section-title">Informasi Dasar</h4>
+                                    <div className="form-group">
+                                        <label className="label">Nama Kegiatan / Program</label>
+                                        <input name="namaProgram" value={formState.namaProgram} onChange={handleFormChange} className="input" required />
+                                    </div>
+                                    <div className="form-grid-2-col">
+                                        <div className="form-group">
+                                            <label className="label">Ormawa</label>
+                                            <select name="ormawa" value={formState.ormawa} onChange={handleFormChange} className="input">
+                                                {ormawaOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="form-group"><label className="label">Tahun Anggaran</label><input name="tahun" type="number" value={formState.tahun} onChange={handleFormChange} className="input" required /></div>
+                                    </div>
+                                </div>
+                                <div className="form-section">
+                                    <h4 className="form-section-title">Status & Keterkaitan</h4>
+                                    <div className="form-grid-2-col">
+                                        <div className="form-group"><label className="label">Status</label><select name="status" value={formState.status} onChange={handleFormChange} className="input">{statusOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select></div>
+                                        <div className="form-group"><label className="label">Tgl. Kegiatan (Opsional)</label><input name="tanggalKegiatan" type="date" value={formState.tanggalKegiatan || ''} onChange={handleFormChange} className="input" /></div>
+                                    </div>
+                                    {(formState.status === 'Selesai' || formState.status === 'SPJ Masuk') && (
+                                        <div className="form-group"><label className="label">Link Dokumen SPJ (Opsional)</label><div className="input-with-icon"><LinkIcon size={16}/>
+                                        <input name="linkSPJ" type="url" value={formState.linkSPJ || ''} onChange={handleFormChange} className="input" placeholder="https://docs.google.com/..."/></div></div>
+                                    )}
+                                    <div className="form-group"><label className="label">Tautkan ke Proker BEM (Opsional)</label><select name="tautanProker" value={formState.tautanProker || ''} onChange={handleFormChange} className="input"><option value="">-- Tidak Ditautkan --</option>{prokerBemList.map(proker => <option key={proker.id} value={proker.id}>{proker.nama}</option>)}</select></div>
+                                </div>
+                                <div className="form-section">
+                                    <h4 className="form-section-title">Data Keuangan</h4>
+                                    <div className="form-grid-2-col">
+                                        {/* Total Diajukan BARU */}
+                                        <div className="form-group">
+                                            <label className="label">Total Anggaran Diajukan (Rp)</label>
+                                            <div className="input-with-icon">
+                                                <Wallet size={16}/>
+                                                <input name="totalDiajukan" type="text" value={formatRupiah(formState.totalDiajukan)} onChange={handleCurrencyChange} className="input" placeholder="Contoh: 1.500.000" required />
+                                            </div>
+                                        </div>
+                                        {/* Total Disetujui (Anggaran Lama) */}
+                                        <div className="form-group">
+                                            <label className="label">Total Anggaran Disetujui (Rp)</label>
+                                            <div className="input-with-icon">
+                                                <Wallet size={16}/>
+                                                <input name="totalAnggaran" type="text" value={formatRupiah(formState.totalAnggaran)} onChange={handleCurrencyChange} className="input" placeholder="Contoh: 1.000.000" required />
+                                            </div>
+                                        </div>
+                                        {/* Perbaikan Mode Input Realisasi */}
+                                        <div className="form-group">
+                                            <label className="label">Mode Input Realisasi</label>
+                                            <div className="form-mode-switcher mode-switcher-tight">
+                                                <button type="button" onClick={() => setModeRealisasi('rincian')} className={modeRealisasi === 'rincian' ? 'active' : ''}><List size={14}/> Rincian</button>
+                                                <button type="button" onClick={() => setModeRealisasi('rekap')} className={modeRealisasi === 'rekap' ? 'active' : ''}><Edit3 size={14}/> Rekap</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {modeRealisasi === 'rekap' ? (
+                                        <div className="form-group">
+                                            <label className="label sub-label">Total Realisasi (Rp)</label>
+                                            <div className="input-with-icon">
+                                                <Wallet size={16}/>
+                                                <input name="totalRealisasi" type="text" value={formatRupiah(formState.totalRealisasi)} onChange={handleCurrencyChange} className="input" placeholder="Masukkan total dana terpakai" />
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="sub-section">
+                                            <h4 className="sub-section-title">Rincian Pengeluaran</h4>
+                                            {formState.rincianPengeluaran.length > 0 && (
+                                                <div className="rincian-list">
+                                                    {formState.rincianPengeluaran.map(item => (
+                                                        <div key={item.id} className="rincian-item">
+                                                            <div className="rincian-detail-group">
+                                                                <span className="rincian-desc">{item.deskripsi}</span> 
+                                                                <small className="rincian-date">({item.tanggal ? new Date(item.tanggal + 'T00:00:00').toLocaleDateString('id-ID') : 'No Date'})</small>
+                                                            </div>
+                                                            <span className="rincian-jumlah">Rp {Number(item.jumlah).toLocaleString('id-ID')}</span>
+                                                            <button type="button" onClick={() => handleHapusRincian(item.id)} className="button-icon-small danger"><X size={12}/></button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {/* Perbaikan Input Rincian */}
+                                            <div className="form-group-flex rincian-form">
+                                                <div className="input-with-icon" style={{flex: 2}}>
+                                                    <Pencil size={16}/>
+                                                    <input name="deskripsi" value={rincian.deskripsi} onChange={handleRincianChange} className="input" placeholder="Deskripsi Pengeluaran" />
+                                                </div>
+                                                <div className="input-with-icon" style={{flex: 1.5}}>
+                                                    <Wallet size={16}/>
+                                                    <input name="jumlah" type="text" value={formatRupiah(rincian.jumlah)} onChange={handleRincianCurrencyChange} className="input" placeholder="Jumlah (Rp)" />
+                                                </div>
+                                                <div className="input-with-icon" style={{flex: 1}}>
+                                                    <CalendarDays size={16}/>
+                                                    <input name="tanggal" type="date" value={rincian.tanggal} onChange={handleRincianChange} className="input" />
+                                                </div>
+                                                <button type="button" onClick={handleTambahRincian} className="button button-secondary"><Plus size={16}/> Tambah</button>
+                                            </div>
+                                            <div className="rincian-total"><strong>Total Realisasi (Otomatis):</strong><span>Rp {currentTotalRealisasi.toLocaleString('id-ID')}</span></div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="modal-actions">
+                                <button type="button" onClick={closeModal} className="button button-secondary">Batal</button>
+                                <button type="submit" className="button button-success"><Save size={16}/> Simpan Perubahan</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            <header className="page-header">
+                <div><h1 className="page-title">Dashboard Administrasi Dana</h1><p className="page-subtitle">Pusat kontrol dan analisis untuk anggaran Ormawa.</p></div>
+            </header>
+            
+            {/* --- BAGIAN BARU: VISUALISASI GRAFIK --- */}
+            {loading ? <p>Memuat Analisis Data...</p> : (
+                <DashboardCharts 
+                    rekapitulasiList={rekapitulasiList} 
+                    rekapGrandTotal={rekapGrandTotal} 
+                    statusDistributionModified={statusDistributionModified}
+                    rankedListDesc={rankedListDesc} 
+                    rankedListAsc={rankedListAsc} 
+                />
+            )}
+            {/* -------------------------------------- */}
+
+            {/* BAGIAN SBM */}
+            <div className="card mb-24">
+                <div className="list-header">
+                    <h3 className="card-title">Standar Biaya Masukan (SBM)</h3>
+                    <button onClick={() => setIsSbmModalOpen(true)} className="button button-secondary"><List size={16}/> Kelola SBM T.A. {sbmTahunAktif}</button>
+                </div>
+                <p className="page-subtitle">Gunakan SBM ini sebagai acuan pengeluaran program kerja.</p>
+            </div>
+
+            {/* BAGIAN UTAMA: DAFTAR PROGRAM ANGGARAN */}
+            <div className="card">
+                <div className="list-header">
+                    <h3 className="card-title">Daftar Program Anggaran</h3>
+                    <button onClick={handleExport} className="button button-secondary">
+                            <List size={16}/> Export ({filteredAnggaranList.length} Item)
+                        </button>
+                        <button onClick={openModalTambah} className="button button-primary">
+                            <Plus size={16}/> Tambah Program
+                        </button>
+                </div>
+
+                {/* KONTROL FILTER BARU (DIBAGI DUA BARIS) */}
+                    <div className="filter-controls search-input-row">
+                    {/* INPUT PENCARIAN (Mengambil full lebar) */}
+                    <div className="input-with-icon" style={{ flex: 1 }}>
+                        <Search size={16}/>
+                         <input 
+                            className="input" 
+                            type="text" 
+                            placeholder="Cari Nama Program Anggaran..."
+                            value={filters.search} 
+                            onChange={e => setFilters(p => ({...p, search: e.target.value}))}
+                        />
+                    </div>
+                </div>
+
+                 {/* DROPDOWN FILTER (Tahun, Ormawa, Status) */}
+                 <div className="filter-controls dropdown-row">
+                    {/* Filter Tahun */}
+                    <div className="input-with-icon"><Filter size={16}/>
+                        <select className="input" value={filters.tahun} onChange={e => setFilters(p => ({...p, tahun: e.target.value}))}>
+                            {availableYears.map(y => <option key={y} value={y}>{y === 'Semua' ? 'Semua Tahun' : y}</option>)}
+                    </select>
+                    </div>
+                    {/* Filter Ormawa */}
+                    <div className="input-with-icon">
+                        <Filter size={16}/>
+                        <select className="input" value={filters.ormawa} onChange={e => setFilters(p => ({...p, ormawa: e.target.value}))}>
+                            <option value="Semua">Semua Ormawa</option>
+                            {ormawaOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                    </div>
+                    {/* Filter Status (BARU DI UI) */}
+                    <div className="input-with-icon">
+                        <Filter size={16}/>
+                        <select className="input" value={filters.status} onChange={e => setFilters(p => ({...p, status: e.target.value}))}>
+                            <option value="Semua">Semua Status</option>
+                            {statusOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                    </div>
+                </div>
+                 <div className="item-list">
+                      {loading ? <p>Memuat...</p> : (
+                              paginatedAnggaranList.length > 0 ? paginatedAnggaranList.map(item => {
+                                 const serapan = item.totalAnggaran > 0 ? ((item.totalRealisasi || 0) / item.totalAnggaran) * 100 : 0;
+                                 return (
+                                     <div key={item.id} className="list-item-condensed">
+                                         <div className="item-main-info"><strong title={item.namaProgram}>{item.namaProgram} ({item.tahun})</strong><small>{item.ormawa} {item.tanggalKegiatan && `• ${new Date(item.tanggalKegiatan + 'T00:00:00').toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})}`}</small></div>
+                                         <div className="item-stats"><div><small>Anggaran</small><strong>Rp {Number(item.totalAnggaran).toLocaleString('id-ID')}</strong></div><div><small>Realisasi</small><strong>Rp {(item.totalRealisasi || 0).toLocaleString('id-ID')}</strong></div></div>
+                                         <div className="item-progress"><small>Serapan: {serapan.toFixed(1)}%</small><div className="progress-bar"><div className="progress-bar-fill" style={{width: `${serapan > 100 ? 100 : serapan}%`}}></div></div></div>
+                                         <div className="item-status"><div className="status-badge-wrapper"><span className={`status-badge status-${(item.status || 'perencanaan').toLowerCase().replace(/\s/g, '-')}`}>{item.status}</span>{item.linkSPJ && <LinkIcon size={14} color="#166534" title="SPJ sudah dilampirkan"/>}</div></div>
+                                         <div className="item-actions"><button onClick={() => handleEdit(item)} className="button-icon"><Pencil size={14}/></button><button onClick={() => handleHapus(item.id, item.namaProgram)} className="button-icon danger"><Trash2 size={14}/></button></div>
+                                     </div>
+                                 )
+                              }) : <EmptyState text="Tidak Ada Data" subtext="Tidak ada program yang cocok dengan filter Anda, atau belum ada data yang ditambahkan."/>
+                       )}
+                 </div>
+                 {/* KONTROL PAGINATION BARU */}
+                 {renderPaginationControls()}
+            </div>
+
+            {/* BAGIAN REKAPITULASI DANA PER ORGANISASI */}
+            <div className="card">
+                <h3 className="card-title">Rekapitulasi Dana per Organisasi</h3>
+                <div className="rekap-list item-list">
+                    {rekapitulasiList.map((item, index) => (
+                        <div key={item.ormawa} className="list-item-condensed rekap-item" style={{gridTemplateColumns: 'minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)'}}>
+                            <div className="item-main-info">
+                                <strong>{item.ormawa}</strong>
+                                <small>{item.persentaseSerapan.toFixed(1)}% Serapan</small>
+                            </div>
+                            
+                            <div className="item-rekap-stats" style={{gridTemplateColumns: 'repeat(4, 1fr)', maxWidth: 'none'}}>
+                                <div><small>Diajukan</small><strong>Rp {Number(item.diajukan).toLocaleString('id-ID')}</strong></div>
+                                <div><small>Disetujui</small><strong>Rp {Number(item.disetujui).toLocaleString('id-ID')}</strong></div>
+                                <div><small>Terlaksana</small><strong>Rp {Number(item.terlaksana).toLocaleString('id-ID')}</strong></div>
+                                <div className={item.sisa < 0 ? 'text-danger' : 'text-success'}><small>Sisa</small><strong>Rp {Number(item.sisa).toLocaleString('id-ID')}</strong></div>
+                            </div>
+                        </div>
+                    ))}
+                    {/* GRAND TOTAL REKAPITULASI */}
+                    {rekapitulasiList.length > 0 && (
+                        <div className="list-item-condensed grand-total-row" style={{gridTemplateColumns: 'minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)'}}>
+                            <div className="item-main-info grand-total-label">
+                                <strong>TOTAL KESELURUHAN</strong>
+                                <span className="grand-total-percentage">{rekapGrandTotal.persentaseRealisasi.toFixed(1)}% Realisasi</span>
+                            </div>
+
+                            <div className="grand-total-numbers" style={{gridColumn: '2 / 6', gridTemplateColumns: 'repeat(4, 1fr)'}}>
+                                <div className="grand-total-col">
+                                    <strong>Rp {Number(rekapGrandTotal.diajukan).toLocaleString('id-ID')}</strong>
+                                </div>
+                                <div className="grand-total-col">
+                                    <strong>Rp {Number(rekapGrandTotal.disetujui).toLocaleString('id-ID')}</strong>
+                                </div>
+                                <div className="grand-total-col">
+                                    <strong>Rp {Number(rekapGrandTotal.terlaksana).toLocaleString('id-ID')}</strong>
+                                </div>
+                                <div className="grand-total-col">
+                                    <strong className={rekapGrandTotal.sisa < 0 ? 'text-danger' : 'text-success'}>
+                                        Rp {Number(rekapGrandTotal.sisa).toLocaleString('id-ID')}
+                                    </strong>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {rekapitulasiList.length === 0 && <EmptyState text="Tidak Ada Data Rekapitulasi" subtext="Tidak ada anggaran yang disetujui untuk ORMAWA di tahun yang difilter."/>}
+                </div>
+            </div>
+            
+            <button onClick={() => navigate("/admin")} className="button button-secondary" style={{width: '100%', marginTop: '8px'}}><ArrowLeft size={16}/> Kembali ke Dashboard</button>
+        </div>
+    );
+};
+
+export default AdminAnggaran;

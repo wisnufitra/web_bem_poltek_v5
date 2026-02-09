@@ -1,0 +1,24 @@
+/* src/index.css */
+
+/* --- PERBAIKAN UTAMA: Menghapus margin & padding default dari browser --- */
+body, html {
+  margin: 0;
+  padding: 0;
+  /* Menggunakan font Poppins yang sudah Anda definisikan sebelumnya */
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Memastikan semua elemen dihitung dengan cara yang konsisten */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+

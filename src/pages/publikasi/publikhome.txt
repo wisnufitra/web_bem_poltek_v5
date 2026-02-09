@@ -1,0 +1,296 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { db } from "../../firebase/firebaseConfig";
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import emailjs from '@emailjs/browser';
+import { 
+  CheckCircle2, XCircle, Trash2, FileText, Calendar, 
+  Search, BookOpen, Clock, Edit, Save, X, 
+  Users, GraduationCap, Phone, Mail, Tag, Globe, Plus,
+  Printer, RotateCcw, Eye, Download, AlertTriangle, MoreVertical
+} from 'lucide-react';
+import logo from "../../assets/logo-bempoltek.png"; 
+
+const AdminPublikasi = () => {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState("pending");
+  const [searchTerm, setSearchTerm] = useState("");
+  
+  const [selectedDoc, setSelectedDoc] = useState(null); 
+  const [previewPdfUrl, setPreviewPdfUrl] = useState(null); 
+  const [printingDoc, setPrintingDoc] = useState(null); 
+
+  useEffect(() => {
+    const q = query(collection(db, "repository"), orderBy("created_at", "desc"));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setDocs(data);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  const stats = useMemo(() => ({
+    total: docs.length,
+    pending: docs.filter(d => d.status === 'pending').length,
+    approved: docs.filter(d => d.status === 'approved').length,
+    rejected: docs.filter(d => d.status === 'rejected').length
+  }), [docs]);
+
+  const filteredDocs = docs.filter(doc => {
+    const matchesStatus = filterStatus === 'all' ? true : doc.status === filterStatus;
+    const firstAuthor = doc.penulis && doc.penulis[0] ? doc.penulis[0].nama : "";
+    const matchesSearch = doc.judul.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          doc.submission_id?.toLowerCase().includes(searchTerm.toLowerCase()) || // Bisa cari by ID juga
+                          firstAuthor.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesStatus && matchesSearch;
+  });
+
+  const handleQuickStatus = async (id, newStatus, docData) => { 
+      let confirmMsg = `Ubah status menjadi "${newStatus}"?`;
+      if (!window.confirm(confirmMsg)) return;
+
+      try {
+         await updateDoc(doc(db, "repository", id), { status: newStatus });
+         
+         if (newStatus === 'approved' || newStatus === 'rejected') {
+            const statusLabel = newStatus === 'approved' ? 'DISETUJUI / TERBIT' : 'DITOLAK / REVISI';
+            const linkPublikasi = `${window.location.origin}/publikasi/${encodeURIComponent(docData.submission_id)}`;
+            
+            const emailParams = {
+                  to_name: docData.penulis[0].nama,
+                  to_email: docData.email_kontak,
+                  judul_karya: docData.judul,
+                  submission_id: docData.submission_id, // Added ID
+                  status_verifikasi: statusLabel,
+                  status_besar: statusLabel, 
+                  pesan_tambahan: newStatus === 'rejected' ? 'Mohon periksa kembali kesesuaian format atau hubungi admin.' : 'Karya Anda kini dapat diakses oleh publik.',
+                  link_publikasi: linkPublikasi
+            };
+
+            emailjs.send('service_957o6ud', 'template_7v71409', emailParams, 'mR4WC1z6KwUPQI5hc')
+                  .then(() => console.log('Email notifikasi terkirim'))
+                  .catch((err) => console.error('Gagal kirim email', err));
+         }
+         setSelectedDoc(null);
+      } catch (err) {
+         alert(err.message);
+      }
+   };
+
+  const handlePrintBukti = (docData) => {
+    setPrintingDoc(docData);
+    setTimeout(() => { window.print(); }, 800);
+  };
+
+  const getPreviewLink = (url) => {
+    if (!url) return "";
+    return url.replace(/\/view.*/, '/preview').replace(/\/edit.*/, '/preview');
+  };
+
+  const PdfPreviewModal = ({ url, onClose }) => (
+    <div className="modal-backdrop" onClick={onClose}>
+        <div className="modal-panel pdf-panel" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+                <h3>Pratinjau Dokumen</h3>
+                <div className="head-actions">
+                    <a href={url} target="_blank" rel="noreferrer" className="btn-icon-head" title="Download Asli"><Download size={20}/></a>
+                    <button onClick={onClose} className="btn-close-modal"><X size={24}/></button>
+                </div>
+            </div>
+            <div className="pdf-body">
+                <iframe src={getPreviewLink(url)} title="PDF Preview" width="100%" height="100%"></iframe>
+            </div>
+        </div>
+    </div>
+  );
+
+  const DetailModal = ({ docData, onClose }) => {
+    const [isEditing, setIsEditing] = useState(false);
+    const [formData, setFormData] = useState({
+      judul: docData.judul || "", abstrak: docData.abstrak || "", jenis_karya: docData.jenis_karya || "",
+      prodi: docData.prodi || "", tanggal_publikasi: docData.tanggal_publikasi || "", bahasa: docData.bahasa || "Bahasa Indonesia",
+      email_kontak: docData.email_kontak || "", no_wa: docData.no_wa || "", nama_konferensi: docData.nama_konferensi || "",
+      penerbit: docData.penerbit || "", referensi: docData.referensi || "", status: docData.status || "pending",
+      kata_kunci_str: docData.kata_kunci ? docData.kata_kunci.join(", ") : ""
+    });
+    const [penulisList, setPenulisList] = useState(docData.penulis || []);
+    const [kontributorList, setKontributorList] = useState(docData.kontributor || []);
+
+    const handlePenulisChange = (idx, field, val) => { const list = [...penulisList]; list[idx][field] = val; setPenulisList(list); };
+    const addPenulis = () => setPenulisList([...penulisList, { nama: "", nim: "", peran: "Anggota" }]);
+    const removePenulis = (idx) => { const list = [...penulisList]; list.splice(idx, 1); setPenulisList(list); };
+    const handleKontributorChange = (idx, field, val) => { const list = [...kontributorList]; list[idx][field] = val; setKontributorList(list); };
+    const addKontributor = () => setKontributorList([...kontributorList, { nama: "", peran: "Pembimbing 2" }]);
+    const removeKontributor = (idx) => { const list = [...kontributorList]; list.splice(idx, 1); setKontributorList(list); };
+
+    const handleSave = async () => {
+      try {
+        const keywordString = formData.kata_kunci_str || ""; 
+        const dataToSave = { ...formData, penulis: penulisList, kontributor: kontributorList, updated_at: new Date() };
+        dataToSave.kata_kunci = keywordString.split(',').map(k => k.trim()).filter(k => k !== "");
+        delete dataToSave.kata_kunci_str;
+        await updateDoc(doc(db, "repository", docData.id), dataToSave);
+        setIsEditing(false);
+        alert("Data berhasil diperbarui!");
+      } catch (error) { alert("Gagal menyimpan: " + error.message); }
+    };
+
+    const handleDelete = async () => {
+      if(!window.confirm("PERINGATAN KERAS:\nData akan dihapus permanen.")) return;
+      try { await deleteDoc(doc(db, "repository", docData.id)); onClose(); } catch (err) { alert(err.message); }
+    };
+
+    return (
+      <div className="modal-backdrop" onClick={onClose}>
+        <div className="modal-panel" onClick={e => e.stopPropagation()}>
+          <div className="modal-head">
+            <div className="head-left">
+               {isEditing ? <span className="badge-mode">Mode Edit</span> : <span className={`status-badge-lg ${docData.status}`}>{docData.status}</span>}
+               <div>
+                   <h3 className="trunc-title">Detail Dokumen</h3>
+                   {/* ID di Modal Title */}
+                   <div style={{fontSize:'0.8rem', color:'#64748b', fontFamily:'monospace'}}>ID: {docData.submission_id}</div>
+               </div>
+            </div>
+            <div className="head-actions">
+               {!isEditing && docData.status === 'approved' && <button onClick={() => handlePrintBukti(docData)} className="btn-icon-head print"><Printer size={18}/></button>}
+               <button onClick={() => setIsEditing(!isEditing)} className={`btn-icon-head ${isEditing ? 'cancel' : ''}`}>{isEditing ? <X size={20}/> : <Edit size={20}/>}</button>
+               <button onClick={onClose} className="btn-close-modal"><X size={24}/></button>
+            </div>
+          </div>
+          
+          <div className="modal-scroll">
+            {isEditing ? (
+              <div className="edit-form-wrapper">
+                 {/* Form Edit Code Here (Same as before) */}
+                 <div className="edit-section">
+                    <h4>Informasi Utama</h4>
+                    <div className="form-group"><label>Judul Karya</label><textarea className="input-text area-sm" value={formData.judul} onChange={e => setFormData({...formData, judul: e.target.value})} /></div>
+                    {/* ... rest of form ... */}
+                    <div className="modal-footer-edit"><button onClick={handleSave} className="btn-act save full"><Save size={18}/> Simpan Perubahan</button></div>
+                 </div>
+              </div>
+            ) : (
+              <>
+                <h2 className="modal-title">{docData.judul}</h2>
+                <div className="view-grid">
+                   <div className="view-box full">
+                      <label><Users size={14}/> Penulis</label>
+                      <div className="list-stack">{docData.penulis.map((p, i) => <div key={i}>{p.nama} <span className="sub-txt">({p.nim}) - {p.peran}</span></div>)}</div>
+                   </div>
+                   <div className="view-box"><label>Prodi</label><p>{docData.prodi}</p></div>
+                   <div className="view-box"><label>Jenis</label><p>{docData.jenis_karya}</p></div>
+                   <div className="view-box"><label>Tanggal</label><p>{docData.tanggal_publikasi}</p></div>
+                   <div className="view-box"><label>Kontak</label><p>{docData.email_kontak || '-'}</p></div>
+                </div>
+                <div className="view-section"><label>Abstrak</label><div className="abstract-view">{docData.abstrak}</div></div>
+                <div className="view-section"><label>File Naskah</label><div className="file-actions-row"><button onClick={() => setPreviewPdfUrl(docData.file_view_url)} className="btn-file-view primary"><Eye size={18}/> Baca Dokumen</button><a href={docData.file_url} target="_blank" rel="noreferrer" className="btn-file-view secondary"><Download size={18}/> Download</a></div></div>
+              </>
+            )}
+          </div>
+
+          {!isEditing && (
+              <div className="modal-footer">
+                 {docData.status === 'pending' && (
+                    <>
+                       <button onClick={() => handleQuickStatus(docData.id, 'rejected', docData)} className="btn-act reject"><XCircle size={18}/> Tolak</button>
+                       <button onClick={() => handleQuickStatus(docData.id, 'approved', docData)} className="btn-act approve"><CheckCircle2 size={18}/> Setujui</button>
+                    </>
+                 )}
+                 {docData.status === 'approved' && <button onClick={() => handleQuickStatus(docData.id, 'pending', docData)} className="btn-act warning"><RotateCcw size={18}/> Tarik (Unpublish)</button>}
+                 {docData.status === 'rejected' && <button onClick={() => handleQuickStatus(docData.id, 'pending', docData)} className="btn-act neutral"><RotateCcw size={18}/> Pulihkan</button>}
+                 <button onClick={handleDelete} className="btn-act delete"><Trash2 size={18}/> Hapus</button>
+              </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="page-container">
+      <div className="screen-content">
+          <div className="page-header">
+            <div><h1>Verifikasi Publikasi</h1><p>Kelola, edit, verifikasi, dan cetak bukti publikasi mahasiswa.</p></div>
+            <div className="header-stats">
+               <div className="stat-item pending"><Clock size={16}/> <span>Pending: <strong>{stats.pending}</strong></span></div>
+               <div className="stat-item approved"><CheckCircle2 size={16}/> <span>Active: <strong>{stats.approved}</strong></span></div>
+            </div>
+          </div>
+
+          <div className="filter-bar">
+             <div className="tabs">
+                {['pending', 'approved', 'rejected', 'all'].map(status => (
+                   <button key={status} onClick={() => setFilterStatus(status)} className={`tab-btn ${filterStatus === status ? 'active' : ''}`}>{status === 'pending' ? 'Menunggu' : status === 'approved' ? 'Diterima' : status === 'rejected' ? 'Ditolak' : 'Semua'}</button>
+                ))}
+             </div>
+             <div className="search-wrap">
+                <Search size={18}/>
+                <input type="text" placeholder="Cari Judul, Penulis, atau ID..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/>
+                {searchTerm && <button onClick={() => setSearchTerm("")} className="btn-clear-search"><X size={14}/></button>}
+             </div>
+          </div>
+
+          <div className="content-list">
+             {loading ? <div className="state-msg"><div className="spinner"></div></div> : filteredDocs.length === 0 ? 
+                <div className="state-msg empty"><BookOpen size={48} className="icon-empty"/><h3>Tidak ada dokumen</h3></div> : (
+                <div className="cards-wrapper">
+                   {filteredDocs.map((doc) => (
+                      <div key={doc.id} className="admin-list-item" onClick={() => setSelectedDoc(doc)}>
+                         <div className={`status-indicator ${doc.status}`}></div>
+                         <div className="list-content">
+                            <div className="list-header">
+                               <div style={{display:'flex', flexDirection:'column', gap:'2px'}}>
+                                   <span className="list-title">{doc.judul}</span>
+                                   <span className="badge-id">ID: {doc.submission_id}</span>
+                               </div>
+                               <span className={`status-pill-sm ${doc.status}`}>{doc.status}</span>
+                            </div>
+                            <div className="list-meta">
+                               <span className="author">{doc.penulis[0]?.nama || "Tanpa Nama"}</span> &bull; 
+                               <span className="type">{doc.jenis_karya}</span> &bull; 
+                               <span className="date">{doc.created_at?.toDate().toLocaleDateString('id-ID')}</span>
+                            </div>
+                            <div className="list-snippet">{doc.abstrak ? doc.abstrak.substring(0, 140) + "..." : "Tidak ada abstrak."}</div>
+                         </div>
+                         <div className="list-actions"><button className="btn-mini">Kelola</button></div>
+                      </div>
+                   ))}
+                </div>
+             )}
+          </div>
+      </div>
+
+      {selectedDoc && <DetailModal docData={selectedDoc} onClose={() => setSelectedDoc(null)} />}
+      {previewPdfUrl && <PdfPreviewModal url={previewPdfUrl} onClose={() => setPreviewPdfUrl(null)} />}
+
+      <div className="printable-area">{printingDoc && (/* Print Template Code Same as Before */ <></>)}</div>
+
+      <style>{`
+          /* CSS SAMA SEPERTI SEBELUMNYA + STYLE BARU UNTUK BADGE ID */
+          .page-container { font-family: 'Inter', sans-serif; max-width: 1200px; margin: 0 auto; padding-bottom: 60px; }
+          .page-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 20px; }
+          /* ... CSS LAIN ... */
+          
+          /* STYLE BARU: BADGE ID */
+          .badge-id {
+              font-size: 0.75rem; 
+              color: #64748b; 
+              font-family: monospace; 
+              background: #f1f5f9; 
+              padding: 2px 6px; 
+              border-radius: 4px;
+              width: fit-content;
+              display: inline-block;
+          }
+          
+          /* ... LANJUTAN CSS LAMA ... */
+          .admin-list-item { display: flex; background: white; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; cursor: pointer; transition: 0.2s; position: relative; }
+          /* ... */
+      `}</style>
+    </div>
+  );
+};
+
+export default AdminPublikasi;
